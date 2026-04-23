@@ -1,0 +1,118 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+
+\title{IAA - Football Match Predicition Model}
+\author{Tomás Gameiro \& João Cabral}
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+\section{Data Processing Methodology}
+
+Our data processing pipeline transforms raw match history and squad information into engineered features suitable for goal prediction. The pipeline consists of four main stages: data loading, feature aggregation, temporal validation, and table construction.
+
+\subsection{Data Sources}
+
+We utilize 12 CSV files sourced from transfermarkt data: \texttt{games.csv} (match results and metadata), \texttt{club\_games.csv} (club-centric match records), \texttt{clubs.csv} (squad-level attributes), \texttt{players.csv} (player static data), \texttt{player\_valuations.csv} (market value time series), \texttt{transfers.csv} (transfer history), \texttt{game\_lineups.csv} (team lineups), \texttt{appearances.csv} (player match participation), and supporting tables for competitions and countries.
+
+\subsection{Feature Aggregation Strategy}
+
+For each match, we engineer features in the following categories:
+
+\subsubsection{Form and Performance}
+Computed from \texttt{club\_games.csv} using rolling windows (e.g., last 5 and last 10 matches): points per game, goal difference, goals for, goals against, clean-sheet frequency, and win rate. We separate these metrics by \texttt{hosting} status (Home vs.\ Away) to capture the home-advantage effect and venue-specific performance.
+
+\subsubsection{Squad Strength}
+Aggregated from \texttt{clubs.csv} and \texttt{player\_valuations.csv} on the match date: total market value of the squad, average player value, squad size, average age, and estimated value of the starting eleven (using estimated starters from lineup frequency).
+
+\subsubsection{Availability and Injury Status}
+Derived from \texttt{game\_lineups.csv} and \texttt{appearances.csv}: the proportion of typical starters available in recent matches, recent cumulative minutes played by expected starters, and player-rotation rate to infer injury/suspension patterns.
+
+\subsubsection{Head-to-Head History}
+From prior \texttt{games.csv} records between the same two clubs (filtered to dates before the current match): goals for/against and win rate in previous meetings.
+
+\subsubsection{Transfer Activity}
+From \texttt{transfers.csv}: recent incoming and outgoing player counts, net transfer spend, and the recency of roster changes to capture squad continuity.
+
+\subsubsection{Context}
+Competition type, season, round, and a binary home-advantage indicator.
+
+\subsection{Temporal Ordering and Data Leakage Prevention}
+
+A critical constraint is that all features must use only information available \emph{before} the match date. We enforce this by filtering each data source (particularly \texttt{game\_lineups.csv}, \texttt{appearances.csv}, and \texttt{player\_valuations.csv}) to include only records with timestamps strictly prior to the target match. This prevents the model from using post-match outcomes (goals, assists, red cards) or same-game lineup participation data.
+
+\subsection{Training Table Construction}
+
+The output is a single feature table with one row per match. For each match in \texttt{games.csv}, we join aggregated statistics for the home and away club, creating separate columns prefixed with \texttt{home\_} and \texttt{away\_}. The target variables are \texttt{home\_goals} and \texttt{away\_goals} extracted from the match result.
+
+\section{Explored Models}
+
+Our modeling objective is to predict two quantities for each match: the number of goals scored by the home team and the number of goals scored by the away team. Instead of directly predicting only the final outcome (home win/draw/away win), this formulation provides a richer prediction and allows us to derive the final result afterwards.
+
+Given this objective and the tabular nature of our engineered features, we explored three supervised learning approaches: Linear Regression, Random Forest Regressor and XGBoost Regressor. These models were selected to cover different levels of complexity, from a simple and interpretable baseline to more expressive non-linear models.
+
+\subsection{Linear Regression}
+
+Linear Regression was used as a baseline model. It is easy to interpret and fast to train, which makes it useful to validate the pipeline and confirm that features such as recent form, home/away performance and squad value contain predictive signal.
+
+However, the relation between football match context and goals scored is highly non-linear and includes interactions (for example, recent form interacting with home advantage). A purely linear model is limited in its ability to capture these patterns, so we did not expect it to be the final choice.
+
+\subsection{Random Forest Regressor}
+
+Random Forest Regressor was explored as a non-linear ensemble baseline. It can model feature interactions and is relatively robust to noise and outliers, which is valuable in football data where match outcomes are inherently volatile.
+
+Its main limitations for our use case are: reduced extrapolation capacity, less efficient handling of very sparse/high-cardinality encodings, and typically lower predictive accuracy than boosting methods on structured tabular datasets when careful feature engineering is available.
+
+\subsection{XGBoost}
+
+XGBoost Regressor was selected as our final approach for both target variables (home goals and away goals). Gradient boosting is widely regarded as a strong choice for tabular prediction tasks and is well suited to the feature types in this project.
+
+The decision to prioritize XGBoost is justified by the following technical arguments:
+
+\begin{itemize}
+	\item It captures non-linear relations and feature interactions more effectively than linear models.
+	\item It usually provides stronger predictive performance than bagging methods (such as Random Forest) on engineered tabular data.
+	\item It includes regularization and shrinkage mechanisms that help control overfitting.
+	\item It handles heterogeneous feature scales without requiring aggressive preprocessing.
+	\item It provides feature-importance tools that support model interpretability and critical reflection.
+\end{itemize}
+
+Therefore, our final strategy is a dual-regression XGBoost setup: one model predicts home-team goals and another predicts away-team goals. The predicted scoreline can then be converted into a categorical outcome when needed.
+
+\section{Preliminary Ethical Considerations}
+
+We acknowledge several ethical dimensions of this work that warrant careful consideration:
+
+\subsection{Gambling and Problem Gambling}
+
+Match prediction models are often used to inform betting decisions. While our model is developed for research and analytical purposes, we recognize the potential for misuse in gambling contexts. We emphasize that football outcomes remain inherently uncertain, and no model can provide certainty. Predictions should not be presented as investment advice or used to encourage gambling behavior. Users should be aware of the risks of problem gambling and use predictions responsibly, if at all, within legal and ethical frameworks.
+
+\subsection{Data Privacy}
+
+Our dataset includes historical player and club information (e.g., player valuations, transfer history, squad composition) sourced from publicly available transfermarkt data. While this data is public, we are mindful that aggregating such information could reveal sensitive patterns about players' health, contract status, or personal circumstances. We use only aggregate and historical statistics, not real-time personal data, and we do not attempt to infer or publish individual player injuries or private details.
+
+\subsection{Model Limitations and Uncertainty}
+
+Football matches are inherently unpredictable due to factors beyond available data: weather, refereeing decisions, psychological momentum, and pure chance. Our model captures correlations in historical data but cannot account for these non-data factors. We emphasize that predictions should be interpreted as probabilistic estimates, not certainties. Large upsets occur regularly in football, and users must recognize the model's epistemic limits.
+
+\subsection{Bias in Historical Data}
+
+Our training data reflects historical match outcomes, which embed sociological and economic biases: wealthier clubs have more resources and win more often; underdog teams produce larger prediction errors; domestic leagues vary in competitive balance. The model will inherit these patterns. While some patterns are genuine (e.g., home-team advantage is real), others may reflect systemic inequalities in resource distribution. We acknowledge this bias and recommend using the model only in contexts where such patterns are understood and appropriate.
+
+\subsection{Potential for Misuse}
+
+If the model achieved very high predictive accuracy, it could theoretically be exploited by actors seeking to detect anomalies or manipulate match outcomes. We emphasize that match fixing is illegal and unethical. The model should be used only for legitimate analytical or entertainment purposes. Any evidence of misuse should be reported to appropriate authorities.
+
+\subsection{Transparency and Responsible Disclosure}
+
+We are committed to transparency about the model's design, limitations, and performance. Predictions should be presented with confidence intervals or uncertainty quantification where possible. We will not claim infallibility and will openly discuss model failures and edge cases. If vulnerabilities are discovered, we commit to responsible disclosure practices.
+
+\section{Adjustements since Deliverable 1}
+
+\section{}
+
+\end{document}
