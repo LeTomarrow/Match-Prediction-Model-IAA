@@ -20,6 +20,7 @@ import pandas as pd
 ROLL_WINDOWS = (3, 5, 10)
 FORM_WINDOWS = (3, 5)
 TRANSFER_WINDOWS_DAYS = (180, 365)
+MIN_MATCH_DATE = pd.Timestamp("2018-01-01")
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,6 +111,7 @@ def build_games_label_table(data_dir: Path, max_games: int | None = None) -> pd.
     games = games.dropna(subset=["date", "home_club_id", "away_club_id"])\
                  .sort_values(["date", "game_id"])\
                  .reset_index(drop=True)
+    games = games[games["date"] >= MIN_MATCH_DATE].reset_index(drop=True)
     if max_games is not None and max_games > 0:
         games = games.head(max_games).copy()
     return games

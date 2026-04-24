@@ -1,3 +1,5 @@
 numpy
 pandas
-argparse
+scikit-learn
+xgboost
+joblib
