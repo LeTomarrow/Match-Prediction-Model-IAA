@@ -113,6 +113,20 @@ We are committed to transparency about the model's design, limitations, and perf
 
 \section{Adjustements since Deliverable 1}
 
-\section{}
+Since Deliverable 1, the project has been refined in scope, modeling strategy, and data engineering rigor. The main adjustments are summarized below.
+
+\subsection{Feature Scope Reduction and Aggregation Strategy}
+
+Following feedback about feasibility and methodological clarity, we reduced reliance on fine-grained player-level and position-specific modeling. Instead, we prioritized robust team-level aggregates (form, home/away performance, head-to-head indicators, squad-value summaries, and transfer activity).
+
+When player-related data is used, it is incorporated only through aggregate proxies (for example squad value and recent availability indicators), not through complex positional tactical modeling. This improves implementation feasibility while preserving informative signals.
+
+\subsection{Model Selection Refinement}
+
+In Deliverable 1, model selection was still open-ended. In this deliverable, we implemented a clearer comparison framework using one baseline linear model and two non-linear tree-based alternatives, then converged to XGBoost for the final setup due to its suitability for engineered tabular features and expected predictive robustness.
+
+\subsection{Pipeline Clarity and Reproducibility}
+
+The data workflow is now organized as a reproducible sequence: source ingestion, temporal filtering, feature aggregation, home/away feature merge, and target extraction. This explicit pipeline structure improves transparency, facilitates debugging, and prepares the project for subsequent evaluation and iteration.
 
 \end{document}
