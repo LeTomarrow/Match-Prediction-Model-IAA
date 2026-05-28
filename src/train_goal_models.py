@@ -54,6 +54,8 @@ def parse_args():
                    default=Path(__file__).resolve().parents[1] / "data" / "predictions")
     p.add_argument("--test-size", type=float, default=0.20)
     p.add_argument("--val-size", type=float, default=0.10)
+    p.add_argument("--train-seasons", type=int, default=None,
+                   help="Number of seasons to use for training (overrides percentage split if set)")
     p.add_argument("--random-state", type=int, default=42)
     p.add_argument("--models", nargs="+",
                    choices=["linear_regression", "random_forest", "xgboost"],
@@ -99,20 +101,38 @@ def proba_to_outcome(proba):
 
 def calibrate_blend(val_poisson, val_clf, val_true):
     """Grid-search (w_clf, draw_boost) on validation. Returns (params, best_acc)."""
-    best_acc, best_p = 0.0, (0.4, 1.0)
-    w_options = [0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0] if val_clf is not None else [0.0]
+    best_score, best_p = -999, (0.0, 1.0)
+    w_options = [0.0, 0.3, 0.5, 0.7, 0.9, 1.0] if val_clf is not None else [0.0]
+    # Search from 1.0 to 5.0 with fine granularity
     for w in w_options:
-        for db in [1.0, 1.3, 1.6, 2.0, 2.5, 3.0, 4.0]:
+        for db in np.arange(1.0, 5.0, 0.1):
             if val_clf is not None:
                 blended = (1 - w) * val_poisson + w * val_clf
             else:
                 blended = val_poisson.copy()
             blended[:, 1] *= db
             blended /= blended.sum(axis=1, keepdims=True)
-            acc = float((proba_to_outcome(blended) == val_true).mean())
-            if acc > best_acc:
-                best_acc, best_p = acc, (w, db)
-    return best_p, best_acc
+            pred = proba_to_outcome(blended)
+            acc = float((pred == val_true).mean())
+            
+            # Custom score: prioritize accuracy but reward higher draw recall
+            draw_mask = val_true == 0
+            draw_recall = float((pred[draw_mask] == 0).mean()) if draw_mask.sum() > 0 else 0
+            # Balanced score: 90% accuracy + 10% draw_recall bonus
+            score = acc + (0.1 * draw_recall)
+            
+            if score > best_score:
+                best_score, best_p = score, (w, db)
+    
+    # Recalculate final accuracy with best parameters
+    if val_clf is not None:
+        blended = (1 - best_p[0]) * val_poisson + best_p[0] * val_clf
+    else:
+        blended = val_poisson.copy()
+    blended[:, 1] *= best_p[1]
+    blended /= blended.sum(axis=1, keepdims=True)
+    final_acc = float((proba_to_outcome(blended) == val_true).mean())
+    return best_p, final_acc
 
 # ── Averaging ensemble ────────────────────────────────────────────────────────
 class AveragingEnsemble(BaseEstimator):
@@ -213,10 +233,31 @@ def build_feature_matrix(df):
     valid = yh.notna() & ya.notna()
     return (X.loc[valid].reset_index(drop=True),
             yh.loc[valid].reset_index(drop=True),
-            ya.loc[valid].reset_index(drop=True))
+            ya.loc[valid].reset_index(drop=True),
+            df.loc[valid, "season"].reset_index(drop=True))
 
 # ── Splits ────────────────────────────────────────────────────────────────────
-def three_way_split(X, yh, ya, val_size, test_size):
+def three_way_split(X, yh, ya, seasons, val_size, test_size, train_seasons_n=None):
+    if train_seasons_n is not None:
+        all_seasons = sorted(seasons.unique())
+        test_season = all_seasons[-1]
+        val_season = all_seasons[-2]
+        # Train seasons are the n seasons before the val season
+        train_seasons = all_seasons[-(2 + train_seasons_n):-2]
+        
+        print(f"  Season-based split:")
+        print(f"    Train: {train_seasons}")
+        print(f"    Val:   [{val_season}]")
+        print(f"    Test:  [{test_season}]")
+        
+        tr_mask = seasons.isin(train_seasons)
+        val_mask = seasons == val_season
+        te_mask = seasons == test_season
+        
+        return (X[tr_mask], X[val_mask], X[te_mask],
+                yh[tr_mask], yh[val_mask], yh[te_mask],
+                ya[tr_mask], ya[val_mask], ya[te_mask])
+    
     n = len(X)
     iv = int(n * (1 - val_size - test_size))
     it = int(n * (1 - test_size))
@@ -257,11 +298,11 @@ def get_models(selected, rs):
         m["linear_regression"] = LinearRegression()
     if "random_forest" in selected:
         m["random_forest"] = RandomForestRegressor(
-            n_estimators=300, max_depth=12, min_samples_leaf=2,
+            n_estimators=120, max_depth=12, min_samples_leaf=2,
             max_features=0.6, random_state=rs, n_jobs=-1)
     if "xgboost" in selected and HAS_XGBOOST:
         m["xgboost"] = XGBRegressor(
-            n_estimators=700, learning_rate=0.03, max_depth=5,
+            n_estimators=300, learning_rate=0.03, max_depth=5,
             min_child_weight=3, subsample=0.80, colsample_bytree=0.75,
             reg_alpha=0.1, reg_lambda=1.5, gamma=0.1,
             objective="reg:squarederror", random_state=rs, n_jobs=-1)
@@ -274,6 +315,13 @@ def train_classifier(prep, X_tr, yh_tr, ya_tr, rs):
     y_cls = outcome_labels(yh_tr.to_numpy(), ya_tr.to_numpy())
     label_map = {1: 2, 0: 1, -1: 0}
     y_enc = np.array([label_map[v] for v in y_cls])
+    
+    # Compute class weights with standard weighting (remove aggressive boost)
+    classes = np.unique(y_enc)
+    weights = len(y_enc) / (len(classes) * np.bincount(y_enc))
+    sample_weights = np.array([weights[label] for label in y_enc])
+    sample_weights = np.array([weights[label] for label in y_enc])
+    
     clf = Pipeline([
         ("prep", prep),
         ("clf", XGBClassifier(
@@ -281,7 +329,7 @@ def train_classifier(prep, X_tr, yh_tr, ya_tr, rs):
             subsample=0.80, colsample_bytree=0.75, reg_lambda=1.5,
             eval_metric="mlogloss", random_state=rs, n_jobs=-1)),
     ])
-    clf.fit(X_tr, y_enc)
+    clf.fit(X_tr, y_enc, clf__sample_weight=sample_weights)
     return clf
 
 def clf_proba(clf, X):
@@ -403,12 +451,12 @@ def main():
     print(f"Dataset: {len(df):,} rows | "
           f"{df[DATE_COL].min().date()} -> {df[DATE_COL].max().date()}")
 
-    X, yh, ya = build_feature_matrix(df)
+    X, yh, ya, seasons = build_feature_matrix(df)
     print(f"Feature matrix: {X.shape[0]:,} x {X.shape[1]}")
 
     (X_tr, X_val, X_te,
      yh_tr, yh_val, yh_te,
-     ya_tr, ya_val, ya_te) = three_way_split(X, yh, ya, args.val_size, args.test_size)
+     ya_tr, ya_val, ya_te) = three_way_split(X, yh, ya, seasons, args.val_size, args.test_size, args.train_seasons)
 
     prep = build_preprocessor(X_tr)
     models = get_models(args.models, args.random_state)
