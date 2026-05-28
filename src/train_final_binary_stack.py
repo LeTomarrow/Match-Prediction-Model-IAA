@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import warnings
 from pathlib import Path
+import joblib
 
 warnings.filterwarnings("ignore")
 
@@ -19,14 +20,13 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report
 
 try:
     from xgboost import XGBClassifier
     HAS_XGBOOST = True
 except Exception:
     HAS_XGBOOST = False
-
 
 EXCLUDE_COLS = {
     'game_id', 'home_club_id', 'away_club_id', 'date', 'competition_id',
@@ -59,7 +59,7 @@ def load_features(data_dir: Path):
 
 
 def train_and_save(data_dir: Path, models_dir: Path, output_dir: Path):
-    X, y, feature_cols = load_features(data_dir)
+    X, y, _ = load_features(data_dir)
     if X is None:
         return
 
@@ -108,7 +108,6 @@ def train_and_save(data_dir: Path, models_dir: Path, output_dir: Path):
 
     # Save model and predictions
     models_dir.mkdir(parents=True, exist_ok=True)
-    import joblib
     joblib.dump(stack, models_dir / 'stacking_final.pkl')
 
     output_dir.mkdir(parents=True, exist_ok=True)

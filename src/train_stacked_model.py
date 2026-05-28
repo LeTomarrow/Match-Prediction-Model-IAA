@@ -11,7 +11,6 @@ Meta-learner: Logistic Regression.
 import warnings
 warnings.filterwarnings("ignore")
 
-import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -80,10 +79,10 @@ def load_data(data_dir):
     return X, y_binary, feature_cols
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STACKING ENSEMBLE TRAINING
+# ESEMBLE TRAINING
 # ══════════════════════════════════════════════════════════════════════════════
 
-def train_stacked_model(X, y, feature_cols):
+def train_stacked_model(X, y):
     """Implement and train the Stacking Ensemble model for BINARY classification"""
     
     print("\n" + "="*70)
@@ -170,7 +169,6 @@ def train_stacked_model(X, y, feature_cols):
     
     # Evaluate
     y_pred = stack.predict(X_test_imp)
-    y_prob = stack.predict_proba(X_test_imp)[:, 1]
     
     acc = accuracy_score(y_test, y_pred)
     
@@ -200,11 +198,11 @@ def main():
     base_dir = Path(__file__).resolve().parent.parent
     data_dir = base_dir / "data"
     
-    X, y, cols = load_data(data_dir)
+    X, y, _ = load_data(data_dir)
     if X is None:
         return
     
-    stack_model, acc, home_win_recall = train_stacked_model(X, y, cols)
+    stack_model, acc, home_win_recall = train_stacked_model(X, y)
     
     print("\n" + "="*70)
     print("SUMMARY")

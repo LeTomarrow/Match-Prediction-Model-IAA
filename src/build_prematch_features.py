@@ -409,6 +409,7 @@ def build_transfer_features(games: pd.DataFrame, data_dir: Path) -> pd.DataFrame
                     row[f"transfer_net_spend_{wd}d"] = 0.0
                     row[f"transfer_net_incoming_value_{wd}d"] = 0.0
                     row[f"transfer_squad_churn_count_{wd}d"] = 0.0
+                    row[f"transfer_squad_churn_share_{wd}d"] = 0.0
                 out_rows.append(row)
             continue
 

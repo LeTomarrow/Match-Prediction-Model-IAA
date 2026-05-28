@@ -10,11 +10,10 @@ on the binary task to compare with the Stacking Ensemble results.
 import warnings
 warnings.filterwarnings("ignore")
 
-import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, roc_auc_score
+from sklearn.metrics import classification_report, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
